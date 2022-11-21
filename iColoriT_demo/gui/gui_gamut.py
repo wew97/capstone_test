@@ -6,13 +6,19 @@ from PyQt5.QtWidgets import QWidget
 
 from .lab_gamut import abGrid, lab2rgb_1d, rgb2lab_1d
 
+###
+from flask import Flask, render_template, request, url_for
+from flaskwebgui import FlaskUI
+from flask_restx import Resource, Api
+###
+
 
 class GUIGamut(QWidget):
-
     update_color = pyqtSignal(object)
 
     def __init__(self, gamut_size=110):
-        QWidget.__init__(self)
+        #QWidget.__init__(self)
+        Flask.__init__(self, __name__)
         self.gamut_size = gamut_size
         self.win_size = gamut_size * 2  # divided by 4
         self.setFixedSize(self.win_size, self.win_size)

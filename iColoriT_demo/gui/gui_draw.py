@@ -12,6 +12,12 @@ from PyQt5.QtGui import QColor, QImage, QPainter
 from PyQt5.QtWidgets import QApplication, QFileDialog, QWidget
 from skimage import color
 
+###
+from flask import Flask, render_template, request, url_for
+from flaskwebgui import FlaskUI
+from flask_restx import Resource, Api
+###
+
 from .lab_gamut import snap_ab
 from .ui_control import UIControl
 
@@ -25,7 +31,8 @@ class GUIDraw(QWidget):
     update_result = pyqtSignal(object)
 
     def __init__(self, model=None, load_size=224, win_size=512, device='cpu'):
-        QWidget.__init__(self)
+        #QWidget.__init__(self)
+        Flask.__init__(self, __name__)
         self.image_file = None
         self.pos = None
         self.model = model
@@ -151,7 +158,7 @@ class GUIDraw(QWidget):
         self.color = None
         self.uiControl.reset()
         self.init_color()
-        self.compute_result()
+        self.update_result.emit(None)
         self.update()
 
     def scale_point(self, pnt):
@@ -211,7 +218,7 @@ class GUIDraw(QWidget):
         # self.emit(SIGNAL('update_color'), str('background-color: %s' % self.color.name()))
         self.update_color.emit(str('background-color: %s' % self.color.name()))
         self.uiControl.update_color(snap_qcolor, self.user_color)
-        self.compute_result()
+        self.compute_changed_color()
 
     def erase(self):
         self.eraseMode = not self.eraseMode
@@ -220,6 +227,10 @@ class GUIDraw(QWidget):
         img_path = QFileDialog.getOpenFileName(self, 'load an input image')[0]
         if img_path is not None and os.path.exists(img_path):
             self.init_result(img_path)
+
+    def apply_image(self):
+        self.compute_result()
+
 
     def save_result(self):
         path = os.path.abspath(self.image_file)
@@ -241,8 +252,41 @@ class GUIDraw(QWidget):
         self.use_gray = not self.use_gray
         self.update()
 
+    def compute_changed_color(self):
+        im, mask = self.uiControl.get_input()
+        im_mask0 = mask > 0.0
+        self.im_mask0 = im_mask0.transpose((2, 0, 1))  # (1, H, W)
+        im_lab = color.rgb2lab(im).transpose((2, 0, 1))  # (3, H, W)
+        self.im_ab0 = im_lab[1:3, :, :]
+
+        # _im_lab is 1) normalized 2) a torch tensor
+        _im_lab = self.im_lab.transpose((2, 0, 1))
+        _im_lab = np.concatenate(((_im_lab[[0], :, :] - 50) / 100, _im_lab[1:, :, :] / 110), axis=0)
+        _im_lab = torch.from_numpy(_im_lab).type(torch.FloatTensor).to(self.device)
+
+        # _img_mask is 1) normalized ab 2) flipped mask
+        _img_mask = np.concatenate((self.im_ab0 / 110, (255 - self.im_mask0) / 255), axis=0)
+        _img_mask = torch.from_numpy(_img_mask).type(torch.FloatTensor).to(self.device)
+
+        # _im_lab is the full color image, _img_mask is the ab_hint+mask
+        ab = self.model(_im_lab.unsqueeze(0), _img_mask.unsqueeze(0))
+        ab = rearrange(ab, 'b (h w) (p1 p2 c) -> b (h p1) (w p2) c',
+                       h=self.load_size // self.model.patch_size, w=self.load_size // self.model.patch_size,
+                       p1=self.model.patch_size, p2=self.model.patch_size)[0]
+        ab = ab.detach().numpy()
+
+        ab_win = cv2.resize(ab, (self.win_w, self.win_h), interpolation=cv2.INTER_CUBIC)
+        ab_win = ab_win * 110
+        pred_lab = np.concatenate((self.l_win[..., np.newaxis], ab_win), axis=2)
+        pred_rgb = (np.clip(color.lab2rgb(pred_lab), 0, 1) * 255).astype('uint8')
+        self.result = pred_rgb
+        # self.emit(SIGNAL('update_result'), self.result)
+        self.update()
+
+
     def compute_result(self):
         im, mask = self.uiControl.get_input()
+        print('mask:', mask)
         im_mask0 = mask > 0.0
         self.im_mask0 = im_mask0.transpose((2, 0, 1)) # (1, H, W)
         im_lab = color.rgb2lab(im).transpose((2, 0, 1))#(3, H, W)
@@ -272,6 +316,41 @@ class GUIDraw(QWidget):
         # self.emit(SIGNAL('update_result'), self.result)
         self.update_result.emit(self.result)
         self.update()
+        return pred_rgb
+
+    def compute_result_html(self, image_file):
+        im, mask = self.uiControl.get_input()
+        im = cv2.imread(image_file)
+        im_mask0 = mask > 0.0
+        self.im_mask0 = im_mask0.transpose((2, 0, 1)) # (1, H, W)
+        im_lab = color.rgb2lab(im).transpose((2, 0, 1))#(3, H, W)
+        self.im_ab0 = im_lab[1:3, :, :]
+
+        # _im_lab is 1) normalized 2) a torch tensor
+        _im_lab = self.im_lab.transpose((2,0,1))
+        _im_lab = np.concatenate(((_im_lab[[0], :, :]-50) / 100, _im_lab[1:, :, :] / 110), axis=0)
+        _im_lab = torch.from_numpy(_im_lab).type(torch.FloatTensor).to(self.device)
+
+        # _img_mask is 1) normalized ab 2) flipped mask
+        _img_mask = np.concatenate((self.im_ab0 / 110, (255-self.im_mask0) / 255), axis=0)
+        _img_mask = torch.from_numpy(_img_mask).type(torch.FloatTensor).to(self.device)
+
+        # _im_lab is the full color image, _img_mask is the ab_hint+mask
+        ab = self.model(_im_lab.unsqueeze(0), _img_mask.unsqueeze(0))
+        ab = rearrange(ab, 'b (h w) (p1 p2 c) -> b (h p1) (w p2) c',
+                        h=self.load_size//self.model.patch_size, w=self.load_size//self.model.patch_size,
+                        p1=self.model.patch_size, p2=self.model.patch_size)[0]
+        ab = ab.detach().numpy()
+
+        ab_win = cv2.resize(ab, (self.win_w, self.win_h), interpolation=cv2.INTER_CUBIC)
+        ab_win = ab_win * 110
+        pred_lab = np.concatenate((self.l_win[..., np.newaxis], ab_win), axis=2)
+        pred_rgb = (np.clip(color.lab2rgb(pred_lab), 0, 1) * 255).astype('uint8')
+        self.result = pred_rgb
+        # self.emit(SIGNAL('update_result'), self.result)
+        self.update_result.emit(self.result)
+        self.update()
+        return pred_rgb
 
     def paintEvent(self, event):
         painter = QPainter()
@@ -316,21 +395,20 @@ class GUIDraw(QWidget):
                 self.ui_mode = 'point'
                 self.change_color(pos)
                 self.update_ui(move_point=False)
-                self.compute_result()
-
+                self.compute_changed_color()
             if event.button() == Qt.RightButton:
                 # draw the stroke
                 self.pos = pos
                 self.ui_mode = 'erase'
                 self.update_ui(move_point=False)
-                self.compute_result()
+                self.compute_changed_color()
 
     def mouseMoveEvent(self, event):
         self.pos = self.valid_point(event.pos())
         if self.pos is not None:
             if self.ui_mode == 'point':
                 self.update_ui(move_point=True)
-                self.compute_result()
+                self.compute_changed_color()
 
     def mouseReleaseEvent(self, event):
         pass

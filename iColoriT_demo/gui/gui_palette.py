@@ -3,13 +3,20 @@ from PyQt5.QtCore import QSize, Qt, pyqtSignal
 from PyQt5.QtGui import QColor, QPainter, QPen
 from PyQt5.QtWidgets import QWidget
 
+###
+from flask import Flask, render_template, request, url_for
+from flaskwebgui import FlaskUI
+from flask_restx import Resource, Api
+###
+
 
 class GUIPalette(QWidget):
 
     update_color = pyqtSignal(object)
 
     def __init__(self, grid_sz=(6, 3)):
-        QWidget.__init__(self)
+        #QWidget.__init__(self)
+        Flask.__init__(self, __name__)
         self.color_width = 25
         self.border = 6
         self.win_width = grid_sz[0] * self.color_width + (grid_sz[0] + 1) * self.border

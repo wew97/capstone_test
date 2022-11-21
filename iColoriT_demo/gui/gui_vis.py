@@ -3,9 +3,16 @@ from PyQt5.QtGui import QColor, QImage, QPainter
 from PyQt5.QtWidgets import QWidget
 
 
+###
+from flask import Flask, render_template, request, url_for
+from flaskwebgui import FlaskUI
+from flask_restx import Resource, Api
+###
+
 class GUI_VIS(QWidget):
     def __init__(self, win_size=256, scale=2.0):
-        QWidget.__init__(self)
+        #QWidget.__init__(self)
+        Flask.__init__(self, __name__)
         self.result = None
         self.win_width = win_size
         self.win_height = win_size

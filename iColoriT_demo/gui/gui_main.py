@@ -1,25 +1,36 @@
 import time
 
 from PyQt5.QtCore import Qt
-from PyQt5.QtWidgets import QCheckBox, QGroupBox, QHBoxLayout, QPushButton, QVBoxLayout, QWidget
+from PyQt5.QtWidgets import QCheckBox, QGroupBox, QHBoxLayout, QPushButton, QVBoxLayout, QWidget, QLabel, QMainWindow, QApplication
 
 from .gui_draw import GUIDraw
 from .gui_gamut import GUIGamut
 from .gui_palette import GUIPalette
 from .gui_vis import GUI_VIS
 
+###
+from flask import Flask, render_template, request, url_for
+from flaskwebgui import FlaskUI
+from flask_restx import Resource, Api
+###
 
-class IColoriTUI(QWidget):
-    def __init__(self, color_model, img_file=None, load_size=224, win_size=256, device='cpu'):
+
+class IColoriTUI(QWidget): #QWidget -> QMainWindow
+    def __init__(self, color_model, img_file=None, load_size=224, win_size=256, device='cpu', *args, **kwargs):
+        #with flask
+        super(IColoriTUI, self).__init__(*args, **kwargs)
+        # self.QMainWindow = QMainWindow()
         # draw the layout
-        QWidget.__init__(self)
+
+        #QWidget.__init__(self)
+        Flask.__init__(self, __name__)
 
         # main layout
         mainLayout = QHBoxLayout()
-        self.setLayout(mainLayout)
+        self.setLayout(mainLayout) #self ->self.widget
 
         # gamut layout
-        self.gamutWidget = GUIGamut(gamut_size=110)
+        self.gamutWidget = GUIGamut(gamut_size=150)
         gamutLayout = self.AddWidget(self.gamutWidget, 'ab Color Gamut')
         colorLayout = QVBoxLayout()
 
@@ -34,7 +45,7 @@ class IColoriTUI(QWidget):
         self.colorPush = QPushButton()  # to visualize the selected color
         self.colorPush.setFixedWidth(self.usedPalette.width())
         self.colorPush.setFixedHeight(25)
-        self.colorPush.setStyleSheet("background-color: grey")
+        self.colorPush.setStyleSheet("background-color: white")
         colorPushLayout = self.AddWidget(self.colorPush, 'Current Color')
         colorLayout.addLayout(colorPushLayout)
         colorLayout.setAlignment(Qt.AlignTop)
@@ -42,7 +53,8 @@ class IColoriTUI(QWidget):
         # drawPad layout
         drawPadLayout = QVBoxLayout()
         mainLayout.addLayout(drawPadLayout)
-        self.drawWidget = GUIDraw(color_model, load_size=load_size, win_size=win_size, device=device)
+        self.drawWidget = GUIDraw(color_model, load_size=224, win_size=512, device=device)
+        print('1:', win_size)
         drawPadLayout = self.AddWidget(self.drawWidget, 'Drawing Pad')
         mainLayout.addLayout(drawPadLayout)
 
@@ -55,17 +67,24 @@ class IColoriTUI(QWidget):
         self.bLoad.setToolTip('load an input image')
         self.bSave = QPushButton("&Save")
         self.bSave.setToolTip('Save the current result.')
+        self.bApply = QPushButton('&Colorize')
+        self.bApply.setStyleSheet('QPushButton {background-color: #A3C1DA; color: white; font-size: 20px; '
+                                  'font-family: Times;}')
+        self.bApply.setToolTip('apply the final image')
 
+        drawPadMenu.addWidget(self.bApply)
         drawPadMenu.addWidget(self.bGray)
         drawPadMenu.addWidget(self.bLoad)
         drawPadMenu.addWidget(self.bSave)
 
+
         drawPadLayout.addLayout(drawPadMenu)
-        self.visWidget = GUI_VIS(win_size=win_size, scale=win_size / float(load_size))
+        self.visWidget = GUI_VIS(win_size=512, scale=win_size / float(load_size))
         visWidgetLayout = self.AddWidget(self.visWidget, 'Colorized Result')
         mainLayout.addLayout(visWidgetLayout)
 
         self.bRestart = QPushButton("&Restart")
+        self.bRestart.setStyleSheet('QPushButton {background-color: #A3C1DA; color: white;}')
         self.bRestart.setToolTip('Restart the system')
 
         self.bQuit = QPushButton("&Quit")
@@ -103,6 +122,7 @@ class IColoriTUI(QWidget):
         self.bGray.toggled.connect(self.enable_gray)
         self.bSave.clicked.connect(self.save)
         self.bLoad.clicked.connect(self.load)
+        self.bApply.clicked.connect(self.apply)
 
         self.start_t = time.time()
 
@@ -115,7 +135,7 @@ class IColoriTUI(QWidget):
         widgetBox = QGroupBox()
         widgetBox.setTitle(title)
         vbox_t = QVBoxLayout()
-        vbox_t.addWidget(widget)
+        vbox_t.addWidget(widget, alignment=Qt.AlignCenter)
         widgetBox.setLayout(vbox_t)
         widgetLayout.addWidget(widgetBox)
 
@@ -147,6 +167,9 @@ class IColoriTUI(QWidget):
 
     def load(self):
         self.drawWidget.load_image()
+
+    def apply(self):
+        self.drawWidget.apply_image()
 
     def change_color(self):
         print('change color')
